@@ -41,6 +41,7 @@ CHART_MAP: dict[str, Path] = {
     "charts/genre_count_distribution.png": CHARTS_DIR / "genre_count_distribution.png",
     "charts/rule_auc_comparison.png":      CHARTS_DIR / "rule_auc_comparison.png",
     "charts/fallback_usage.png":           CHARTS_DIR / "fallback_usage.png",
+    "charts/auc_progression.png":         CHARTS_DIR / "auc_progression.png",
 }
 
 # Colour constants

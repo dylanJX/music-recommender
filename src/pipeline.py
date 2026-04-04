@@ -503,13 +503,94 @@ def run(config: dict[str, Any], rule: str = "all") -> None:
 
     # ── Step 5: Score and write ───────────────────────────────────────────
     log.info("Step 5 — Scoring and writing submission(s) [rule=%s] …", rule)
-    rules_to_run = ["rule1", "rule2", "rule3"] if rule == "all" else [rule]
+    rule_based = ["rule1", "rule2", "rule3"]
+    if rule == "all":
+        rules_to_run = rule_based
+    elif rule in ("lgbm", "lgbm_v2", "lgbm_v3", "lgbm_v4", "lgbm_v5", "lgbm_ensemble"):
+        rules_to_run = []
+    else:
+        rules_to_run = [rule]
 
     for r in rules_to_run:
         log.info("  Applying %s …", r)
         _score_and_write(
             r, warm_pairs, cold_pairs, pair_features, features, config,
             submissions_dir,
+        )
+
+    # ── LGBM rules ────────────────────────────────────────────────────────────
+    from src import ranker as ranker_mod
+
+    if rule in ("lgbm", "all"):
+        log.info("Step 5b — LightGBM LambdaRank (v1) …")
+        ranker_mod.run(
+            data=data,
+            warm_pairs=warm_pairs,
+            test_pair_features=pair_features,
+            cold_pairs=cold_pairs,
+            features=features,
+            config=config,
+            submissions_dir=submissions_dir,
+        )
+
+    if rule in ("lgbm_v2", "all"):
+        log.info("Step 5c — LightGBM LambdaRank v2 (hard negatives + meta-features) …")
+        ranker_mod.run_v2(
+            data=data,
+            warm_pairs=warm_pairs,
+            test_pair_features=pair_features,
+            cold_pairs=cold_pairs,
+            features=features,
+            config=config,
+            submissions_dir=submissions_dir,
+        )
+
+    if rule in ("lgbm_v3", "all"):
+        log.info("Step 5d — LightGBM Binary Classifier v3 (hard negatives + meta-features) …")
+        ranker_mod.run_v3(
+            data=data,
+            warm_pairs=warm_pairs,
+            test_pair_features=pair_features,
+            cold_pairs=cold_pairs,
+            features=features,
+            config=config,
+            submissions_dir=submissions_dir,
+        )
+
+    if rule in ("lgbm_v4", "all"):
+        log.info("Step 5e — LightGBM LambdaRank v4 (extended features + normalisation) …")
+        ranker_mod.run_v4(
+            data=data,
+            warm_pairs=warm_pairs,
+            test_pair_features=pair_features,
+            cold_pairs=cold_pairs,
+            features=features,
+            config=config,
+            submissions_dir=submissions_dir,
+        )
+
+    if rule in ("lgbm_v5", "all"):
+        log.info("Step 5f — LightGBM Binary Classifier v5 (extended features + normalisation) …")
+        ranker_mod.run_v5(
+            data=data,
+            warm_pairs=warm_pairs,
+            test_pair_features=pair_features,
+            cold_pairs=cold_pairs,
+            features=features,
+            config=config,
+            submissions_dir=submissions_dir,
+        )
+
+    if rule in ("lgbm_ensemble", "all"):
+        log.info("Step 5g — Ensemble (rule2*0.4 + lgbm_v4*0.6) …")
+        ranker_mod.run_ensemble(
+            data=data,
+            warm_pairs=warm_pairs,
+            test_pair_features=pair_features,
+            cold_pairs=cold_pairs,
+            features=features,
+            config=config,
+            submissions_dir=submissions_dir,
         )
 
     # ── Step 6: 80/20 AUC estimate ────────────────────────────────────────
@@ -561,10 +642,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--rule", default="all",
-        choices=["all", "rule1", "rule2", "rule3"],
+        choices=["all", "rule1", "rule2", "rule3", "lgbm", "lgbm_v2", "lgbm_v3",
+                 "lgbm_v4", "lgbm_v5", "lgbm_ensemble"],
         help=(
-            "Scoring rule to apply.  'all' writes one CSV per rule "
-            "(default: all)"
+            "Scoring rule to apply.  'all' writes one CSV per rule including "
+            "lgbm/lgbm_v2/lgbm_v3 (default: all)"
         ),
     )
     parser.add_argument(

@@ -496,59 +496,242 @@ fallback, discarding potentially useful album-level signal.
 
 ---
 
+---
+
+## Part 3: Advanced Ranking Experiments
+
+### Motivation
+
+Rule 2's heuristic weights (0.70 content / 0.15 SVD / 0.15 UU-CF) were tuned
+manually.  The hypothesis was that a learned ranker could discover better weight
+combinations automatically and capture non-linear feature interactions invisible
+to a linear combiner.
+
+---
+
+### LightGBM v1 — Initial Attempt (Kaggle AUC: 0.675)
+
+**Approach:** LGBMRanker (LambdaRank objective) trained directly on the full
+user interaction histories, with content and IDF features as input.
+
+**Why it failed — two core problems:**
+
+1. **Training / test distribution mismatch.**  The training set contains random
+   user interactions (tracks the user chose to listen to vs. random unseen
+   tracks as negatives).  The test set has 6 *curated hard negatives* per user
+   — tracks from the same artist, album, or genre as the positive — which are
+   far more difficult to distinguish.  A model trained on easy random negatives
+   learns a too-simple boundary.
+2. **No meta-features.**  The model had to re-learn every signal from raw
+   features instead of building on Rule 2's proven 0.863 signal.
+
+**Lesson:** Naive application of learning-to-rank fails when the train/test
+negative distributions differ.
+
+---
+
+### LightGBM v2 — Hard Negatives + Meta-features (Kaggle AUC: 0.762)
+
+**Fix 1 — Mirrored test structure in training data.**
+For each training user, 3 held-out positive interactions were paired with 3
+hard negatives sampled from the same artist/album as the positive (but not
+heard by the user), producing 6-candidate groups identical to the test structure.
+
+**Fix 2 — Meta-feature stacking.**
+`rule1_score` and `rule2_score` were added as explicit input features so
+LightGBM re-ranks on top of the proven heuristics rather than from scratch.
+
+**Improvement:** +0.087 AUC over v1, but still below the heuristic baseline
+at 0.863.
+
+**Bottleneck identified:** `max_train_users = 5000` used only 10% of the
+49,204 available training users.  The model was severely underfitted.
+
+---
+
+### LightGBM v3 — Binary Classifier (Kaggle AUC: 0.768)
+
+**Change:** Swapped LGBMRanker for LGBMClassifier (`objective='binary'`),
+ranking at inference by `predict_proba[:, 1]`.  `scale_pos_weight` was set
+to the negative/positive ratio to address class imbalance.
+
+**Result:** Marginal improvement (+0.006 over v2).
+
+Both v2 and v3 remained below Rule 2 — confirming the bottleneck was sample
+size, not model objective.
+
+---
+
+### LightGBM v4 — Scale Up LambdaRank (Kaggle AUC: 0.769)
+
+**Changes:**
+- `max_train_users` raised from 5,000 to **40,000** (8× more users)
+- `n_estimators` increased to 1,000, `learning_rate` reduced to 0.02
+- `num_leaves` raised to 127
+- Six new features added (29 total):
+
+| New Feature | Description |
+|-------------|-------------|
+| `rule3_score` | Rule 3 score as meta-feature (stacks all three heuristics) |
+| `score_rank` | Rank of `rule2_score` within the user's 6 candidates (1 = best) |
+| `album_artist_combined` | `album_score × 0.5 + artist_score × 0.5` |
+| `genre_coverage_ratio` | `genre_nonzero_count / genre_count` |
+| `user_activity_score` | `log(total training interactions + 1)` per user |
+| `track_global_rank` | Global 1-based rank of all 224k tracks by popularity |
+
+All features were min-max normalised to [0, 1] (fit on training data, applied
+identically to test to prevent data leakage).
+
+**Result:** 0.769 — minimal gain (+0.001) over v3.  LambdaRank proved
+sensitive to the hard-negative construction quality at this scale.
+
+---
+
+### LightGBM v5 — Scale Up Binary Classifier (Kaggle AUC: 0.801)
+
+**Change from v4:** Same 40,000-user training data and 29 features, but
+LGBMClassifier (binary) instead of LGBMRanker.
+
+**Result:** Significant jump to 0.801 (+0.033 over v4).  Binary cross-entropy
+optimisation is more stable than pairwise LambdaRank for this problem structure.
+`track_global_rank` was the single most important feature (importance 9,800),
+validating the hypothesis that global popularity ordering is highly discriminative
+for the curated hard-negative test set.
+
+Still below Rule 2 (0.863) — standalone LightGBM cannot replicate the IDF and
+CF signals entirely from scratch.
+
+---
+
+### Ensemble — Rule 2 × 0.4 + LGBM v4 × 0.6 (Kaggle AUC: 0.875) ← BEST
+
+**Formula:**
+```
+lgbm_norm = (lgbm_v4_score - min) / (max - min)   # per-warm-user normalisation
+final_score = 0.4 × rule2_score + 0.6 × lgbm_norm
+```
+
+**Why it works:** Rule 2 and LightGBM make different types of errors.
+- Rule 2 is strong on users with rich album/artist history (high-IDF matches).
+- LightGBM is stronger at capturing non-linear genre and activity interactions.
+- Blending complementary error patterns yields better overall coverage.
+
+**Result:** 0.875 — +0.012 over Rule 2 alone, +0.074 over the best standalone
+LightGBM (v5).  This is the best submission overall.
+
+**Key insight:** Heuristic rules and learned ranking are *complementary*, not
+competing, approaches.  The ensemble anchored 40% on the proven heuristic
+provides a stable floor while the learned model contributes upside on pairs
+where the heuristic is uncertain.
+
+---
+
+### Complete Results Summary
+
+| Submission | Method | Kaggle AUC | vs hw4 Baseline |
+|------------|--------|:----------:|:---------------:|
+| hw4.py baseline | Content heuristic (IDF, no CF) | 0.851 | — |
+| submission_rule1.csv | Rule 1: Max Genre Focus | 0.857 | +0.006 |
+| submission_rule2.csv | Rule 2: Weighted Hybrid + CF | 0.863 | +0.012 |
+| submission_rule3.csv | Rule 3: Popularity Boosted | 0.859 | +0.008 |
+| submission_lgbm.csv | LGBM v1: Naive LambdaRank | 0.675 | −0.176 |
+| submission_lgbm_v2.csv | LGBM v2: Hard Negatives + Meta | 0.762 | −0.089 |
+| submission_lgbm_v3.csv | LGBM v3: Binary Classifier | 0.768 | −0.083 |
+| submission_lgbm_v4.csv | LGBM v4: 40k LambdaRank (29 feat) | 0.769 | −0.082 |
+| submission_lgbm_v5.csv | LGBM v5: 40k Binary (29 feat) | 0.801 | −0.050 |
+| **submission_ensemble.csv** | **Ensemble: Rule 2 + LGBM v4** | **0.875** | **+0.024** |
+
+![AUC progression across all submissions](charts/auc_progression.png)
+
+---
+
+### Key Findings
+
+1. **Train/test distribution mismatch is the primary failure mode** of naive
+   learning-to-rank.  Without matching the hard-negative structure of the test
+   set in training data, LightGBM scored 0.675 — far below the heuristic.
+
+2. **Meta-feature stacking is critical.**  Feeding `rule1_score`, `rule2_score`,
+   and `rule3_score` as LightGBM inputs allows the model to re-rank on top of
+   proven signals rather than re-learn them from scratch.
+
+3. **Sample size matters more than model complexity.**  Raising training users
+   from 5,000 to 40,000 drove most of the v3→v5 improvement.  Architectural
+   changes (LambdaRank vs. binary) had secondary impact.
+
+4. **Ensembles beat either component alone.**  Even though standalone LightGBM
+   (0.801) still trailed Rule 2 (0.863), their combination reached 0.875 —
+   demonstrating that the two approaches make different mistakes and benefit
+   from complementary blending.
+
+---
+
 ## Conclusion
 
 ### Best Approach
 
-**Rule 2 (Weighted Hybrid Content + CF, Kaggle AUC 0.863)** is the best
-performing rule.  It combines:
-- IDF-weighted content features (hw4 baseline logic) at 70% weight
-- SVD latent-factor CF at 15% weight  
-- User-user neighbourhood CF at 15% weight
+**Ensemble (Rule 2 × 0.4 + LightGBM v4 × 0.6, Kaggle AUC 0.875)** is the
+best overall result, improving +0.024 over the hw4.py baseline and +0.012
+over the best single rule.  The runner-up standalone submission is
+**Rule 2** at 0.863 — the weighted hybrid of IDF content and collaborative
+filtering.
 
 ### Key Insights
 
 1. **IDF weighting is essential:** Moving from raw counts to IDF-weighted
-   preferences lifted AUC from 0.500 (random baseline) to 0.857 on content
-   alone.  Rare artist/genre matches carry far more signal than common ones.
+   preferences lifts AUC substantially on content alone.  Rare artist/genre
+   matches carry far more signal than common ones — an obscure artist gets
+   IDF ≈ 9.4 vs. 1.2 for a mainstream one.
 
 2. **CF signals add +0.006 AUC:** The hybrid (Rule 2) beats the pure content
    baseline (Rule 1) by 0.006 AUC, demonstrating that collaborative taste
    patterns complement content-based preferences.
 
 3. **Soft rank probabilities are critical:** Using `[0.99, 0.95, 0.90, 0.10,
-   0.05, 0.01]` by rank position (rather than hard 0/1 labels) provides a
-   continuous signal for ROC AUC computation.  Without this, all 6 candidates
-   per user received `Predictor=1` → AUC = 0.500.
+   0.05, 0.01]` by rank position provides a continuous signal for ROC AUC
+   computation.  Without this, all 6 candidates per user receive `Predictor=1`
+   → AUC = 0.500.
 
-4. **Album sparsity (75.9% missing) makes fallback logic critical:** The
-   direct album score is unavailable for three-quarters of test pairs, making
-   the Dig Deeper intra-album proxy a meaningful contribution.
+4. **Album sparsity (75.9% missing) makes fallback logic critical:** The Dig
+   Deeper intra-album proxy recovers ~22.8% of pairs that would otherwise fall
+   through to the global popularity fallback.
+
+5. **Unexpected finding — heuristics outperform standalone learned ranking.**
+   Despite 40,000 training users, 29 features, and 1,000 trees, LightGBM v5
+   (0.801) could not surpass Rule 2 (0.863) alone.  The IDF-weighted CF hybrid
+   captures a signal that the learned model requires far more data to replicate
+   from scratch.  Only when combined as an ensemble did learned ranking add
+   value (+0.012 over Rule 2).
 
 ### Limitations
 
-- **High album/artist sparsity** (75.9% / 63.2% missing) means the content
-  features `album_score` and `artist_score` are unavailable for most pairs.
-  The hw4 features (`hw4_album_score`, `hw4_artist_score`) mitigate this by
-  always defaulting to 0.0 rather than NaN.
+- **High album/artist sparsity** (75.9% / 63.2% missing) means `album_score`
+  and `artist_score` are unavailable for most pairs.  The hw4 features
+  mitigate this by defaulting to 0.0 rather than NaN.
 - **CF is computationally expensive:** The full UU + SVD pipeline takes ~4–5
   minutes for 120,000 pairs.  The 80/20 AUC evaluation skips CF for speed,
   so estimated AUCs (0.71–0.74) are pessimistic relative to actual Kaggle
   scores.
 - **No cold users** in the real dataset limits validation of the cold-start
   pathway to synthetic testing.
+- **LGBM training time:** Each LightGBM run with 40k users and CF features
+  takes ~27–30 minutes end-to-end, limiting hyperparameter search iterations.
 
 ### Future Work
 
-- **Learning-to-rank (LTR):** Replace the hand-tuned linear weights with a
-  gradient-boosted ranker (e.g., LightGBM with LambdaRank) trained to directly
-  optimise AUC on the features computed here.
+- **More training users + larger tree budget:** Raising `max_train_users`
+  beyond 40,000 (toward all 49,204) with early stopping via a held-out
+  validation split may close the remaining gap between standalone LGBM and
+  Rule 2.
 - **Neural CF:** Replace TruncatedSVD with a two-tower neural model or
   Variational AutoEncoder for Collaborative Filtering (VAECF) for richer latent
-  representations.
-- **Feature interaction modeling:** The current model is purely additive.
-  Cross-features (e.g., `artist_score × cf_svd_score`) may capture synergies
-  invisible to the linear combiner.
+  representations — then stack those scores as LGBM features.
+- **Feature interaction modeling:** The current linear combiner in Rules 1–3
+  cannot capture synergies.  Cross-features (e.g., `artist_score × cf_svd_score`)
+  may help the heuristic without requiring a full learned ranker.
 - **Reduce `rule3_alpha`:** Setting alpha from 0.20 to ~0.05 would bring
   Rule 3 closer to Rule 2 performance for warm users while retaining the
   popularity hedge for sparse-history users.
+- **Ensemble weight search:** The 0.4/0.6 split was chosen by intuition.  A
+  grid search over blend weights using the 80/20 internal AUC estimate may
+  find a better operating point.

@@ -138,4 +138,70 @@ plt.savefig(charts_dir / "fallback_usage.png", dpi=150, bbox_inches="tight")
 plt.close()
 print("Saved fallback_usage.png")
 
+
+
+# ── Chart 5: AUC progression across all submissions ─────────────────────────
+submissions = [
+    "hw4.py\nbaseline",
+    "Rule 1\n(hw4)",
+    "Rule 2\n(Hybrid CF)",
+    "Rule 3\n(Pop Boost)",
+    "LGBM v1\n(naive)",
+    "LGBM v2\n(hard neg)",
+    "LGBM v3\n(binary)",
+    "LGBM v4\n(40k rank)",
+    "LGBM v5\n(40k cls)",
+    "Ensemble\n(R2+LGBM)",
+]
+aucs_all = [0.851, 0.857, 0.863, 0.859, 0.675, 0.762, 0.768, 0.769, 0.801, 0.875]
+marker_colors = [
+    "#95a5a6",  # hw4 baseline
+    "#3498db",  # rule1
+    "#2ecc71",  # rule2
+    "#e67e22",  # rule3
+    "#e74c3c",  # lgbm v1
+    "#e74c3c",  # lgbm v2
+    "#e74c3c",  # lgbm v3
+    "#e74c3c",  # lgbm v4
+    "#e74c3c",  # lgbm v5
+    "#8e44ad",  # ensemble (best)
+]
+
+fig, ax = plt.subplots(figsize=(13, 6))
+x = np.arange(len(submissions))
+
+# Line connecting all points
+ax.plot(x, aucs_all, color="#555555", linewidth=1.4, zorder=1, linestyle="-")
+
+# Individual markers
+for xi, (auc, col) in enumerate(zip(aucs_all, marker_colors)):
+    ax.scatter(xi, auc, color=col, s=90, zorder=3, edgecolors="white", linewidths=1.2)
+    offset = 0.004 if auc > 0.76 else -0.010
+    va = "bottom" if auc > 0.76 else "top"
+    ax.text(xi, auc + offset, f"{auc:.3f}", ha="center", va=va, fontsize=8.5, fontweight="bold")
+
+# Reference lines
+ax.axhline(y=0.863, color="#2ecc71", linestyle="--", linewidth=1.5,
+           label="Rule 2 baseline (0.863)", zorder=2)
+ax.axhline(y=0.875, color="#8e44ad", linestyle="--", linewidth=1.5,
+           label="Best: Ensemble (0.875)", zorder=2)
+
+ax.set_xticks(x)
+ax.set_xticklabels(submissions, fontsize=9)
+ax.set_ylabel("Kaggle ROC AUC", fontsize=12)
+ax.set_title("AUC Progression Across All Submissions", fontsize=14, fontweight="bold")
+ax.set_ylim(0.63, 0.91)
+ax.grid(axis="y", alpha=0.3)
+ax.legend(fontsize=10, loc="lower right")
+
+# Shade the LGBM-only region to visually separate heuristics from learned
+ax.axvspan(3.5, 8.5, alpha=0.06, color="#e74c3c", label="_LGBM standalone")
+ax.text(6, 0.636, "Standalone LightGBM variants", ha="center", fontsize=8, color="#c0392b", style="italic")
+
+plt.tight_layout()
+plt.savefig(charts_dir / "auc_progression.png", dpi=150, bbox_inches="tight")
+plt.close()
+print("Saved auc_progression.png")
+
+
 print("\nAll charts generated successfully.")

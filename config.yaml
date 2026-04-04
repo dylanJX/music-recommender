@@ -97,6 +97,21 @@ collab_filtering:
   n_components: 20
 
 # ---------------------------------------------------------------------------
+# LightGBM LambdaRank  (ranker.py)
+# ---------------------------------------------------------------------------
+lgbm:
+  n_estimators: 1000
+  learning_rate: 0.02
+  num_leaves: 127
+  min_child_samples: 10
+  subsample: 0.8
+  colsample_bytree: 0.8
+  eval_at: [3]              # NDCG evaluated at rank 3
+  max_train_users: 40000    # cap training users; null = all (~49k users)
+  max_interactions_per_user: 50   # cap interactions per user; limits pairs for CF speed
+  n_eval_users: 3000        # how many val users to use for AUC estimation
+
+# ---------------------------------------------------------------------------
 # Feature engineering cache
 # ---------------------------------------------------------------------------
 features:
