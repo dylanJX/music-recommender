@@ -1,0 +1,104 @@
+# config.yaml
+# All tunable parameters for the music recommender pipeline.
+# Edit this file to adjust behaviour without touching source code.
+
+# ---------------------------------------------------------------------------
+# Data paths
+# ---------------------------------------------------------------------------
+data:
+  dir: data/                        # relative to project root
+  train_file: trainItem2.txt
+  test_file: testItem2.txt
+  track_file: trackData2.txt
+  album_file: albumData2.txt
+  artist_file: artistData2.txt
+  genre_file: genreData2.txt
+
+# ---------------------------------------------------------------------------
+# Pipeline settings
+# ---------------------------------------------------------------------------
+pipeline:
+  top_n: 100                        # recommendations per user (unused when soft_rank_probs set)
+  run_name: baseline_v1             # output CSV stem in submissions/
+  candidate_strategy: unseen        # 'unseen' | 'all'
+  # Soft rank probabilities written to the Predictor column (matches hw4.py's approach).
+  # Rank 1 (best) → 0.99, rank 6 (worst) → 0.01.  Essential for good ROC AUC.
+  soft_rank_probs: [0.99, 0.95, 0.90, 0.10, 0.05, 0.01]
+  # Set to true to run 80/20 AUC evaluation after generating submissions.
+  eval_auc: true
+
+# ---------------------------------------------------------------------------
+# Scorer weights  (Step 1b)
+# Values do not need to sum to 1; they are normalised internally.
+# ---------------------------------------------------------------------------
+scorer:
+  weights:
+    genre_match: 0.35
+    artist_match: 0.30
+    album_match: 0.15
+    popularity: 0.15
+    novelty: 0.05
+
+  # Log-damping factor applied to raw popularity counts before scoring.
+  # Higher values flatten the popularity distribution.
+  popularity_log_base: 10
+
+  # Rule 1 — hw4 Baseline (Content Only)
+  # Weights mirror hw4.py's score_candidate() exactly.
+  # score = hw4_track * w1 + hw4_album * w2 + hw4_artist * w3
+  #         + hw4_genre * w4 + hw4_pop * w5
+  rule1_weights:
+    hw4_track_score: 0.45
+    hw4_album_score: 0.10
+    hw4_artist_score: 0.25
+    hw4_genre_score: 0.15
+    hw4_pop_score: 0.05
+
+  # Rule 2 — Weighted Hybrid (hw4 Content + CF)
+  # Per-user normalised content score blended with CF signals.
+  # score = w_content * content_norm + w_svd * cf_svd + w_uu * cf_uu
+  rule2_weights:
+    w_content: 0.70
+    w_svd: 0.15
+    w_uu: 0.15
+
+  # Rule 3 — Popularity Boosted Hybrid
+  # Score = rule2_score * (1 - alpha) + popularity_score * alpha
+  rule3_alpha: 0.20
+
+# ---------------------------------------------------------------------------
+# Cold-start settings  (Steps 2a & 2b)
+# ---------------------------------------------------------------------------
+cold_start:
+  # Strategy for users with zero training interactions (2a).
+  # Options: 'global_popularity' | 'genre_filtered_popularity'
+  new_user_strategy: global_popularity
+
+  # Strategy for tracks unseen during training (2b).
+  # Options: 'artist_proxy' | 'album_proxy' | 'genre_proxy' | 'global_popularity'
+  new_track_strategy: artist_proxy
+
+  # Fraction of top-N slots to allocate to cold tracks when blending (2b).
+  cold_track_slot_fraction: 0.10
+
+  # Aggregation method for intra-album proxy score (Strategy B).
+  # Options: 'mean' | 'max'
+  intra_album_agg: mean
+
+# ---------------------------------------------------------------------------
+# Collaborative filtering  (collab_features.py)
+# ---------------------------------------------------------------------------
+collab_filtering:
+  # Neighbourhood size for user-user CF score.
+  cf_top_k: 20
+
+  # Number of SVD latent factors.  Clamped automatically to
+  # min(n_users - 1, n_tracks - 1) when the matrix is small.
+  n_components: 20
+
+# ---------------------------------------------------------------------------
+# Feature engineering cache
+# ---------------------------------------------------------------------------
+features:
+  cache_dir: .cache/features/       # set to null to disable caching
+  force_recompute: false

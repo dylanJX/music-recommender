@@ -1,0 +1,31 @@
+# Dataset files — too large and may be private
+data/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Test / build caches
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.venv/
+venv/
+
+# Feature cache (generated at runtime)
+.cache/
+
+# Editor
+.vscode/
+.idea/
+
+# Claude Code local IDE settings
+.claude/
+
+# Submission CSVs (generated output, not source)
+submissions/
